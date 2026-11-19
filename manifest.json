@@ -1,0 +1,19 @@
+{
+  "id": "/carnet-chats/",
+  "name": "Carnet de santé des chats",
+  "short_name": "Carnet Chats",
+  "description": "Carnet de santé de mes chats : identité, poids, vaccins, consultations, photos. Données privées dans mon Google Drive.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#00968a",
+  "theme_color": "#00968a",
+  "lang": "fr",
+  "categories": ["lifestyle", "health"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
