@@ -275,6 +275,7 @@ function render() {
   const sc = $('main') ? $('main').scrollTop : 0;
   const cat = S.catId ? byId('cats', S.catId) : null;
   if (S.view === 'cat' && !cat) { S.view = 'home'; S.catId = null; }
+  $('#app').className = S.view === 'home' ? 'home' : '';
   $('#app').innerHTML = S.view === 'settings' ? viewSettings() : S.view === 'cat' ? viewCat(byId('cats', S.catId)) : viewHome();
   if (key === lastKey && $('main')) $('main').scrollTop = sc;
   lastKey = key; hydrate();
@@ -283,24 +284,31 @@ function render() {
 function viewHome() {
   const cats = live('cats');
   const rem = reminders().filter(e => daysUntil(e.due) <= settings.alertDays);
-  let h = `<header class="top"><button class="ic" data-act="settings" aria-label="Menu">${SVG.menu}</button><h1>Carnet de santé</h1>${cloudBtn()}</header><main>`;
-  if (!cats.length) h += `<div class="card empty"><span class="big">🐾</span><b>Bienvenue !</b><p>Crée la fiche de ton premier chat pour commencer le carnet de santé.</p></div>`;
+  const n = cats.length;
+  const tribe = cats.slice(0, 5).map(c => c.avatarId
+    ? `<div class="tav"><img data-blob="${esc(c.avatarId)}" alt=""></div>` : `<div class="tav">🐱</div>`).join('');
+  let h = `<header class="top"><button class="ic" data-act="settings" aria-label="Menu">${SVG.menu}</button><span class="grow"></span>${cloudBtn()}</header><main class="home-main">
+    <div class="paw p1">🐾</div><div class="paw p2">🐾</div>
+    ${n ? `<div class="tribe">${tribe}</div>` : ''}
+    <h1 class="tribu">Toute la tribu</h1>
+    <p class="tribu-sub">${n ? `${n} petite${n > 1 ? 's' : ''} boule${n > 1 ? 's' : ''} de poils, un seul carnet` : 'Un carnet de santé pour tes chats'}</p>`;
+  if (!n) h += `<div class="tcard empty-t"><span class="big">🐾</span><b>Bienvenue !</b><div class="muted">Crée la fiche de ton premier chat pour commencer le carnet de santé.</div></div>`;
   h += cats.map(c => {
     const ws = live('weights').filter(w => w.catId === c.id).sort((a, b) => b.date.localeCompare(a.date));
     const rc = reminders(c.id).filter(e => daysUntil(e.due) <= settings.alertDays).length;
-    return `<div class="card catcard" style="--c:${c.color || CATCOLORS[0]}" data-act="open-cat" data-id="${c.id}">${avatarHTML(c)}
+    return `<div class="tcard" data-act="open-cat" data-id="${c.id}">${avatarHTML(c, 'big')}
       <div class="grow"><b>${esc(c.name)}</b><div class="muted small">${esc([c.breed, age(c.birth) !== '—' ? age(c.birth) : ''].filter(Boolean).join(' · ') || 'Chat')}</div>
-      <div class="small">${ws[0] ? '⚖️ ' + fmtKg(ws[0].kg) : ''} ${rc ? `<span class="badge soon">${rc} rappel${rc > 1 ? 's' : ''}</span>` : ''}</div></div></div>`;
+      <div class="small">${ws[0] ? '⚖️ ' + fmtKg(ws[0].kg) : ''} ${rc ? `<span class="badge soon">${rc} rappel${rc > 1 ? 's' : ''}</span>` : ''}</div></div><span class="chev">›</span></div>`;
   }).join('');
-  h += `<div class="card addcard" data-act="add" data-col="cats">＋ Ajouter un chat</div>`;
+  h += `<div class="tcard addt" data-act="add" data-col="cats"><span class="plusc">＋</span><b>Ajouter un chat</b></div>`;
   if (rem.length) {
-    h += `<div class="sec">À ne pas oublier</div>` + rem.map(e => {
+    h += `<h2 class="home-h2">À ne pas oublier</h2><div class="todo">` + rem.map(e => {
       const c = byId('cats', e.catId), di = dueInfo(e.due);
-      return `<div class="card item" data-act="open-cat-tab" data-id="${c.id}" data-tab="sante"><div class="ico">${EV[e.type]?.i || '📝'}</div>
-        <div class="grow"><div class="t">${esc(e.title)} — ${esc(c.name)}</div><div class="m">${fmtDate(e.due)}</div></div><span class="badge ${di.cls}">${di.txt}</span></div>`;
-    }).join('');
+      return `<div class="todo-i" data-act="open-cat-tab" data-id="${c.id}" data-tab="sante"><span class="yb">${EV[e.type]?.i || '✓'}</span>
+        <div class="grow"><b>${esc(e.title)} — ${esc(c.name)}</b><div class="small">${fmtDate(e.due)}</div></div><span class="badge ${di.cls}">${di.txt}</span></div>`;
+    }).join('') + `</div>`;
   }
-  if (!settings.driveConnected && cats.length) h += `<div class="hint">☁️ Tes données sont pour l'instant uniquement sur ce téléphone. Active la synchronisation Google Drive dans le menu pour les sauvegarder dans ton Drive.</div>`;
+  if (!settings.driveConnected && n) h += `<div class="homehint">☁️ Tes données sont pour l'instant uniquement sur cet appareil. Active la synchronisation Google Drive dans le menu pour les sauvegarder.</div>`;
   return h + '</main>';
 }
 
