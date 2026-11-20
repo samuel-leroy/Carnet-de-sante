@@ -508,6 +508,7 @@ function viewSettings() {
     <div class="card"><p class="small muted" style="margin-top:0">Tes données sont stockées dans ton Drive (dossier « ${esc(CFG.DRIVE_FOLDER || 'Carnet Chats')} »), jamais ailleurs. Dernière synchro : <b>${ls}</b>.${settings.email ? `<br>Compte : <b>${esc(settings.email)}</b>` : ''}</p>
       <button class="btn block" data-act="sync">☁️ Synchroniser maintenant</button>
       <div class="fld" style="margin-top:14px"><label>Identifiant client Google (OAuth)</label><input id="clientId" placeholder="xxxxx.apps.googleusercontent.com" value="${esc(settings.clientId || CFG.GOOGLE_CLIENT_ID || '')}"></div>
+      <div class="fld"><label>Compte Google commun (adresse e-mail)</label><input id="gmail" type="email" autocomplete="off" placeholder="compte.commun@gmail.com" value="${esc(settings.email || '')}"></div>
       <div class="acts"><button class="btn line" data-act="client-save">Enregistrer</button>${settings.driveConnected ? '<button class="btn danger" data-act="disconnect">Se déconnecter</button>' : ''}</div></div>
     <div class="sec">Rappels</div>
     <div class="card"><div class="fld" style="margin:0"><label>Alerter quand un rappel est dans moins de (jours)</label><input id="alertDays" type="number" inputmode="numeric" min="1" value="${settings.alertDays}"></div>
@@ -597,7 +598,12 @@ document.addEventListener('click', async e => {
     case 'doc-add': addDoc(); break;
     case 'doc-open': openDoc(d.id); break;
     case 'sync': sync(true); break;
-    case 'client-save': settings.clientId = $('#clientId').value.trim(); saveSettings(); token = null; toast('Identifiant enregistré'); break;
+    case 'client-save': {
+      settings.clientId = $('#clientId').value.trim();
+      const em = ($('#gmail').value || '').trim();
+      if (em !== (settings.email || '')) { settings.driveConnected = false; try { localStorage.removeItem(TKEY); } catch (x) {} }
+      settings.email = em; token = null; tokenExp = 0; saveSettings(); render(); toast('Enregistré : appuie sur le nuage ☁️ pour te connecter'); break;
+    }
     case 'alert-save': settings.alertDays = Math.max(1, parseInt($('#alertDays').value) || 30); saveSettings(); toast('Enregistré'); break;
     case 'disconnect': { const t = token; token = null; tokenExp = 0; settings.driveConnected = false; settings.email = ''; saveSettings(); try { localStorage.removeItem(TKEY); } catch (x) {} try { google.accounts.oauth2.revoke(t || '', () => {}); } catch (x) {} render(); toast('Déconnecté de Google Drive'); break; }
     case 'export': {
