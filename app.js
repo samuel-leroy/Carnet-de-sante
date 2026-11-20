@@ -345,27 +345,77 @@ function tabProfil(c) {
   return h;
 }
 
+/* Courbe lissée (interpolation monotone : arrondie, sans dépassement entre deux pesées) */
+function smoothPath(pts) {
+  const f = v => v.toFixed(1), n = pts.length;
+  const lin = () => pts.map((p, i) => (i ? 'L' : 'M') + f(p[0]) + ' ' + f(p[1])).join(' ');
+  if (n < 3) return lin();
+  const dx = [], sl = [], t = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = pts[i + 1][0] - pts[i][0];
+    if (dx[i] <= 0.01) return lin();
+    sl[i] = (pts[i + 1][1] - pts[i][1]) / dx[i];
+  }
+  t[0] = sl[0]; t[n - 1] = sl[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = sl[i - 1] * sl[i] <= 0 ? 0 : (sl[i - 1] + sl[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (sl[i] === 0) { t[i] = t[i + 1] = 0; continue; }
+    const a = t[i] / sl[i], b = t[i + 1] / sl[i], h = a * a + b * b;
+    if (h > 9) { const k = 3 / Math.sqrt(h); t[i] = k * a * sl[i]; t[i + 1] = k * b * sl[i]; }
+  }
+  let d = 'M' + f(pts[0][0]) + ' ' + f(pts[0][1]);
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += ` C${f(pts[i][0] + h)} ${f(pts[i][1] + t[i] * h)} ${f(pts[i + 1][0] - h)} ${f(pts[i + 1][1] - t[i + 1] * h)} ${f(pts[i + 1][0])} ${f(pts[i + 1][1])}`;
+  }
+  return d;
+}
+/* Courbe lissée (interpolation cubique monotone : pas de dépassement entre deux pesées) */
+function smoothPath(pts) {
+  const n = pts.length; if (n < 2) return '';
+  const dx = [], m = [], t = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = dx[i] ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], h = Math.hypot(a, b);
+    if (h > 3) { t[i] = 3 * a / h * m[i]; t[i + 1] = 3 * b / h * m[i]; }
+  }
+  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const c = dx[i] / 3;
+    d += ` C${(pts[i][0] + c).toFixed(1)} ${(pts[i][1] + t[i] * c).toFixed(1)} ${(pts[i + 1][0] - c).toFixed(1)} ${(pts[i + 1][1] - t[i + 1] * c).toFixed(1)} ${pts[i + 1][0].toFixed(1)} ${pts[i + 1][1].toFixed(1)}`;
+  }
+  return d;
+}
 function chart(ws) {
   if (ws.length < 2) return `<div class="empty small">Ajoute au moins 2 pesées pour voir la courbe.</div>`;
-  const W = 320, H = 170, pl = 38, pr = 12, pt = 14, pb = 26;
+  const W = 320, H = 190, pl = 34, pr = 18, pt = 40, pb = 26;
   const xs = ws.map(w => dateObj(w.date).getTime()), ys = ws.map(w => w.kg);
   const x0 = Math.min(...xs), x1 = Math.max(...xs); let y0 = Math.min(...ys), y1 = Math.max(...ys);
-  if (y1 - y0 < .2) { y0 -= .2; y1 += .2; } else { const p = (y1 - y0) * .15; y0 -= p; y1 += p; }
+  if (y1 - y0 < .2) { y0 -= .2; y1 += .2; } else { const p = (y1 - y0) * .18; y0 -= p; y1 += p; }
   const X = v => pl + (x1 === x0 ? (W - pl - pr) / 2 : (v - x0) / (x1 - x0) * (W - pl - pr));
   const Y = v => pt + (1 - (v - y0) / (y1 - y0)) * (H - pt - pb);
   const pts = ws.map((w, i) => [X(xs[i]), Y(ys[i])]);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-  const area = `${line} L${pts[pts.length - 1][0].toFixed(1)} ${H - pb} L${pts[0][0].toFixed(1)} ${H - pb} Z`;
+  const line = smoothPath(pts), last = pts[pts.length - 1];
+  const area = `${line} L${last[0].toFixed(1)} ${H - pb} L${pts[0][0].toFixed(1)} ${H - pb} Z`;
   let g = '';
-  for (let i = 0; i <= 3; i++) {
-    const v = y0 + (y1 - y0) * i / 3, y = Y(v);
-    g += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="#d9e8e6" stroke-dasharray="4 4"/><text x="${pl - 6}" y="${y + 4}" text-anchor="end" font-size="10" fill="#6b8a87">${v.toFixed(1).replace('.', ',')}</text>`;
+  for (let i = 0; i <= 2; i++) {
+    const v = y0 + (y1 - y0) * i / 2, y = Y(v);
+    g += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="#e3efed" stroke-width="1"/><text x="${pl - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#8aa5a2">${v.toFixed(1).replace('.', ',')}</text>`;
   }
   const lbl = s => dateObj(s).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#00968a" stop-opacity=".28"/><stop offset="1" stop-color="#00968a" stop-opacity="0"/></linearGradient></defs>
-    ${g}<path d="${area}" fill="url(#gw)"/><path d="${line}" fill="none" stroke="#00968a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
-    ${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="4.5" fill="#fff" stroke="#00968a" stroke-width="2.5"/>`).join('')}
-    <text x="${pl}" y="${H - 6}" font-size="10" fill="#6b8a87">${lbl(ws[0].date)}</text><text x="${W - pr}" y="${H - 6}" text-anchor="end" font-size="10" fill="#6b8a87">${lbl(ws[ws.length - 1].date)}</text></svg>`;
+  const txt = ys[ys.length - 1].toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' kg';
+  const bw = 8 + txt.length * 6.6, bx = Math.min(Math.max(last[0] - bw / 2, 2), W - bw - 2), by = Math.max(last[1] - 36, 2);
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#00968a" stop-opacity=".32"/><stop offset="1" stop-color="#00968a" stop-opacity="0"/></linearGradient></defs>
+    ${g}<path d="${area}" fill="url(#gw)"/><path d="${line}" fill="none" stroke="#00968a" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${pts.slice(0, -1).map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="#fff" stroke="#00968a" stroke-width="2"/>`).join('')}
+    <line x1="${last[0].toFixed(1)}" x2="${last[0].toFixed(1)}" y1="${last[1].toFixed(1)}" y2="${H - pb}" stroke="#ffd93b" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="6.5" fill="#ffd93b" stroke="#fff" stroke-width="2.5"/>
+    <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="24" rx="9" fill="#fff" stroke="#d3e6e3"/>
+    <text x="${(bx + bw / 2).toFixed(1)}" y="${(by + 16).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="800" fill="#15302d">${txt}</text>
+    <text x="${pl}" y="${H - 6}" font-size="10" fill="#8aa5a2">${lbl(ws[0].date)}</text><text x="${W - pr}" y="${H - 6}" text-anchor="end" font-size="10" fill="#8aa5a2">${lbl(ws[ws.length - 1].date)}</text></svg>`;
 }
 function tabPoids(c) {
   const all = live('weights').filter(w => w.catId === c.id).sort((a, b) => a.date.localeCompare(b.date));
