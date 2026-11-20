@@ -505,7 +505,7 @@ function viewSettings() {
   const ls = settings.lastSync ? new Date(settings.lastSync).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }) : 'jamais';
   return `<header class="top"><button class="ic" data-act="back" aria-label="Retour">${SVG.back}</button><h1>Paramètres</h1><span class="ic ghost"></span></header><main>
     <div class="sec">Synchronisation Google Drive</div>
-    <div class="card"><p class="small muted" style="margin-top:0">Tes données sont stockées dans ton Drive (dossier « ${esc(CFG.DRIVE_FOLDER || 'Carnet Chats')} »), jamais ailleurs. Dernière synchro : <b>${ls}</b>.</p>
+    <div class="card"><p class="small muted" style="margin-top:0">Tes données sont stockées dans ton Drive (dossier « ${esc(CFG.DRIVE_FOLDER || 'Carnet Chats')} »), jamais ailleurs. Dernière synchro : <b>${ls}</b>.${settings.email ? `<br>Compte : <b>${esc(settings.email)}</b>` : ''}</p>
       <button class="btn block" data-act="sync">☁️ Synchroniser maintenant</button>
       <div class="fld" style="margin-top:14px"><label>Identifiant client Google (OAuth)</label><input id="clientId" placeholder="xxxxx.apps.googleusercontent.com" value="${esc(settings.clientId || CFG.GOOGLE_CLIENT_ID || '')}"></div>
       <div class="acts"><button class="btn line" data-act="client-save">Enregistrer</button>${settings.driveConnected ? '<button class="btn danger" data-act="disconnect">Se déconnecter</button>' : ''}</div></div>
@@ -599,7 +599,7 @@ document.addEventListener('click', async e => {
     case 'sync': sync(true); break;
     case 'client-save': settings.clientId = $('#clientId').value.trim(); saveSettings(); token = null; toast('Identifiant enregistré'); break;
     case 'alert-save': settings.alertDays = Math.max(1, parseInt($('#alertDays').value) || 30); saveSettings(); toast('Enregistré'); break;
-    case 'disconnect': token = null; settings.driveConnected = false; saveSettings(); try { google.accounts.oauth2.revoke(token || '', () => {}); } catch (x) {} render(); toast('Déconnecté de Google Drive'); break;
+    case 'disconnect': { const t = token; token = null; tokenExp = 0; settings.driveConnected = false; settings.email = ''; saveSettings(); try { localStorage.removeItem(TKEY); } catch (x) {} try { google.accounts.oauth2.revoke(t || '', () => {}); } catch (x) {} render(); toast('Déconnecté de Google Drive'); break; }
     case 'export': {
       const blob = new Blob([JSON.stringify(D, null, 1)], { type: 'application/json' });
       const l = document.createElement('a'); l.href = URL.createObjectURL(blob); l.download = `carnet-chats-${todayStr()}.json`; l.click(); break;
@@ -621,19 +621,38 @@ const loadGIS = () => new Promise((res, rej) => {
   const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = res;
   s.onerror = () => rej(new Error('Connexion à Google impossible (hors ligne ?)')); document.head.appendChild(s);
 });
+const TKEY = 'carnetChats.v1.token';
+const hasToken = () => !!token && Date.now() < tokenExp - 60000;
+function loadStoredToken() {
+  try { const t = JSON.parse(localStorage.getItem(TKEY)); if (t && t.t && t.exp > Date.now() + 60000) { token = t.t; tokenExp = t.exp; } } catch (e) {}
+}
 async function getToken(silent) {
-  if (token && Date.now() < tokenExp - 60000) return token;
+  if (!hasToken()) loadStoredToken();
+  if (hasToken()) return token;
   const cid = settings.clientId || CFG.GOOGLE_CLIENT_ID;
   if (!cid) { if (!silent) go({ view: 'settings' }); throw new Error("Renseigne d'abord l'identifiant client Google"); }
   await loadGIS();
   return new Promise((res, rej) => {
     const tc = google.accounts.oauth2.initTokenClient({
-      client_id: cid, scope: SCOPE,
-      callback: r => { if (r.error) return rej(new Error(r.error)); token = r.access_token; tokenExp = Date.now() + r.expires_in * 1000; settings.driveConnected = true; saveSettings(); res(token); },
+      client_id: cid, scope: SCOPE, hint: settings.email || undefined,
+      callback: r => {
+        if (r.error) return rej(new Error(r.error));
+        token = r.access_token; tokenExp = Date.now() + r.expires_in * 1000; settings.driveConnected = true; saveSettings();
+        try { localStorage.setItem(TKEY, JSON.stringify({ t: token, exp: tokenExp })); } catch (e) {}
+        res(token);
+        if (!settings.email) rememberAccount();
+      },
       error_callback: er => rej(new Error(er.type === 'popup_closed' ? 'Connexion annulée' : (er.type || 'Erreur Google')))
     });
     tc.requestAccessToken({ prompt: settings.driveConnected ? '' : 'consent' });
   });
+}
+async function rememberAccount() {
+  try {
+    const r = await fetch(`${API}/about?fields=user(emailAddress)`, { headers: { Authorization: 'Bearer ' + token } });
+    const e = r.ok && (await r.json()).user?.emailAddress;
+    if (e) { settings.email = e; saveSettings(); }
+  } catch (x) {}
 }
 async function gfetch(url, opt = {}) {
   const t = await getToken(silentSync);
@@ -700,18 +719,30 @@ async function sync(manual, silent) {
   }
 }
 function scheduleSync() {
-  if (!settings.driveConnected || !token || Date.now() >= tokenExp - 60000) return;
+  if (!settings.driveConnected || !hasToken()) return;
   clearTimeout(syncTimer); syncTimer = setTimeout(() => sync(false), 4000);
 }
 
 /* Synchro discrète à l'ouverture et au retour dans l'appli (récupère les ajouts de l'autre téléphone) */
 function autoSync() {
   if (!settings.driveConnected || syncing || sheetOpen || navigator.onLine === false || Date.now() - lastAuto < 60000) return;
+  if (!hasToken()) loadStoredToken();
+  if (!hasToken()) return;
   lastAuto = Date.now(); sync(false, true);
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoSync(); });
 
+let gestureTried = false;
+document.addEventListener('pointerup', e => {
+  if (gestureTried || !settings.driveConnected || syncing || sheetOpen) return;
+  if (e.target.closest('[data-act=sync],[data-act=disconnect],[data-act=client-save]')) return;
+  if (!hasToken()) loadStoredToken();
+  gestureTried = true;
+  if (!hasToken()) sync(false, true); // compte mémorisé : la fenêtre Google se referme seule si l'accès est déjà accordé
+});
+
 /* ---------- Démarrage ---------- */
+loadStoredToken();
 render(); autoSync();
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 })();
