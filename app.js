@@ -4,7 +4,7 @@
 
 const APP_VERSION = '1.0.0', APP_DATE = '19/11/2026';
 const KEY = 'carnetChats.v1.data', SKEY = 'carnetChats.v1.settings';
-const COLS = ['cats', 'weights', 'events', 'files', 'notes', 'contacts', 'heats'];
+const COLS = ['cats', 'weights', 'events', 'files', 'notes', 'contacts', 'heats', 'presets'];
 const CFG = window.CARNET_CONFIG || {};
 const CATCOLORS = ['#00968a', '#f5a623', '#ef6f6c', '#7e57c2', '#29b6f6'];
 
@@ -19,6 +19,12 @@ const dateObj = s => new Date(s + 'T00:00:00');
 const fmtDate = s => s ? dateObj(s).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 const fmtKg = n => n.toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' kg';
 const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? null : n; };
+function addMonths(s, m) {
+  const d = dateObj(s), day = d.getDate();
+  d.setDate(1); d.setMonth(d.getMonth() + Math.round(m));
+  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 const daysUntil = s => Math.round((dateObj(s) - dateObj(todayStr())) / 864e5);
 const age = b => {
   if (!b) return '—';
@@ -43,7 +49,18 @@ const SVG = {
 };
 
 /* ---------- Données ---------- */
-const fill = d => { COLS.forEach(c => { if (!Array.isArray(d[c])) d[c] = []; }); d.v = 1; return d; };
+const DEFAULT_PRESETS = [
+  { id: 'p-tcc', type: 'vaccin', title: 'Typhus / Coryza / Chlamydiose (TCC)', months: 12 },
+  { id: 'p-felv', type: 'vaccin', title: 'Leucose (FeLV)', months: 12 },
+  { id: 'p-rage', type: 'vaccin', title: 'Rage', months: 12 },
+  { id: 'p-verm', type: 'vermifuge', title: 'Vermifuge', months: 3 },
+  { id: 'p-puces', type: 'antiparasitaire', title: 'Anti-puces / tiques', months: 1 }
+];
+const fill = d => {
+  COLS.forEach(c => { if (!Array.isArray(d[c])) d[c] = []; });
+  DEFAULT_PRESETS.forEach(p => { if (!d.presets.some(x => x.id === p.id)) d.presets.push({ ...p, updatedAt: '2000-01-01T00:00:00.000Z' }); });
+  d.v = 1; return d;
+};
 let D = (() => { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && typeof d === 'object') return fill(d); } catch (e) {} return fill({}); })();
 let settings = Object.assign({ alertDays: 30, clientId: '', driveConnected: false, dirty: false, lastSync: null },
   (() => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch (e) { return {}; } })());
@@ -153,6 +170,10 @@ const FORMS = {
     { k: 'label', l: 'Rôle', type: 'select', o: CONTACTLABELS }, { k: 'name', l: 'Nom', req: 1 },
     { k: 'phone', l: 'Téléphone', type: 'tel' }, { k: 'address', l: 'Adresse' }, { k: 'notes', l: 'Notes', type: 'textarea' }] },
   heats: { t: 'Période de chaleurs', f: [{ k: 'start', l: 'Début', type: 'date', req: 1 }, { k: 'end', l: 'Fin', type: 'date' }, { k: 'notes', l: 'Notes', type: 'textarea' }] },
+  presets: { t: 'Modèle de soin', f: [
+    { k: 'type', l: 'Catégorie', type: 'select', o: [['vaccin', '💉 Vaccin'], ['vermifuge', '🪱 Vermifuge'], ['antiparasitaire', '🐛 Anti-puces / tiques'], ['traitement', '💊 Traitement']] },
+    { k: 'title', l: 'Nom', req: 1, ph: 'ex. Typhus-Coryza' },
+    { k: 'months', l: 'Rappel tous les (mois) — vide = pas de rappel', type: 'number', ph: 'ex. 12' }] },
   files: { t: 'Fichier', f: [{ k: 'title', l: 'Titre' }, { k: 'cat', l: 'Catégorie', type: 'select', o: DOCCATS }, { k: 'date', l: 'Date', type: 'date' }] }
 };
 
@@ -221,15 +242,20 @@ function form({ title, fields, values = {}, onSave, onDelete, extra = '' }) {
 function defaults(col) {
   const t = todayStr();
   return { weights: { date: t }, events: { type: 'vaccin', date: t }, notes: { date: t }, contacts: { label: 'Vétérinaire' },
-    cats: { sex: 'Femelle' }, heats: { start: t }, files: { date: t, cat: DOCCATS[0] } }[col] || {};
+    cats: { sex: 'Femelle' }, presets: { type: 'vaccin', months: 12 }, heats: { start: t }, files: { date: t, cat: DOCCATS[0] } }[col] || {};
+}
+function presetField() {
+  const ps = live('presets').sort((a, b) => a.type.localeCompare(b.type) || a.title.localeCompare(b.title));
+  return { k: 'preset', l: 'Modèle (remplit le titre et le rappel)', type: 'select', o: [['', '— Saisie libre —'], ...ps.map(p => [p.id, (EV[p.type]?.i || '') + ' ' + p.title])] };
 }
 function openEdit(col, id, preset) {
   const def = FORMS[col], cur = id ? byId(col, id) : null;
   form({
-    title: (cur ? 'Modifier — ' : 'Ajouter — ') + def.t, fields: def.f, values: cur || { ...defaults(col), ...preset },
+    title: (cur ? 'Modifier — ' : 'Ajouter — ') + def.t, fields: col === 'events' && !cur ? [presetField(), ...def.f] : def.f, values: cur || { ...defaults(col), ...preset },
     onSave: async v => {
       const obj = { ...(cur || { id: uid(), color: col === 'cats' ? CATCOLORS[live('cats').length % CATCOLORS.length] : undefined }), ...v };
-      if (col !== 'cats' && col !== 'contacts') obj.catId = cur ? cur.catId : S.catId;
+      if (col !== 'cats' && col !== 'contacts' && col !== 'presets') obj.catId = cur ? cur.catId : S.catId;
+      delete obj.preset;
       if (col === 'weights' && !(v.kg > 0)) { toast('Poids invalide'); return; }
       if (col === 'events' && !v.title) obj.title = EV[v.type].l;
       if (col === 'events' && v.due && (!cur || cur.due !== v.due)) obj.done = false;
@@ -245,6 +271,18 @@ function openEdit(col, id, preset) {
       render();
     } : null
   });
+  if (col === 'events' && !cur) {
+    const sel = $('#f_preset'), dt = $('#f_date'), due = $('#f_due'), ty = $('#f_type'), ti = $('#f_title');
+    let auto = !due.value;
+    const chosen = () => D.presets.find(p => p.id === sel.value && !p.deleted);
+    const match = () => live('presets').find(p => p.type === ty.value && p.title.toLowerCase() === ti.value.trim().toLowerCase());
+    const compute = p => { if (p && p.months > 0 && dt.value) due.value = addMonths(dt.value, p.months); };
+    sel.onchange = () => { const p = chosen(); if (!p) return; ty.value = p.type; ti.value = p.title; auto = true; compute(p); };
+    dt.onchange = () => { if (auto) compute(chosen() || match()); };
+    due.oninput = () => { auto = false; };
+    const m = match();
+    if (m && !due.value) { sel.value = m.id; compute(m); }
+  }
 }
 
 /* ---------- Rappels ---------- */
@@ -510,6 +548,13 @@ function viewSettings() {
       <div class="fld" style="margin-top:14px"><label>Identifiant client Google (OAuth)</label><input id="clientId" placeholder="xxxxx.apps.googleusercontent.com" value="${esc(settings.clientId || CFG.GOOGLE_CLIENT_ID || '')}"></div>
       <div class="fld"><label>Compte Google commun (adresse e-mail)</label><input id="gmail" type="email" autocomplete="off" placeholder="compte.commun@gmail.com" value="${esc(settings.email || '')}"></div>
       <div class="acts"><button class="btn line" data-act="client-save">Enregistrer</button>${settings.driveConnected ? '<button class="btn danger" data-act="disconnect">Se déconnecter</button>' : ''}</div></div>
+    <div class="sec">Modèles de soins</div>
+    <div class="card"><p class="small muted" style="margin-top:0">En ajoutant un soin, choisis un modèle : le titre et la date du prochain rappel se remplissent tout seuls. Les durées sont indicatives, à adapter selon l'avis du vétérinaire et le produit utilisé.</p>
+      ${[['vaccin', '💉 Vaccins'], ['vermifuge', '🪱 Vermifuge'], ['antiparasitaire', '🐛 Anti-puces / tiques'], ['traitement', '💊 Traitements']].map(([k, l]) => {
+        const ps = live('presets').filter(p => p.type === k).sort((a, b) => a.title.localeCompare(b.title));
+        return ps.length ? `<div class="sec" style="margin:12px 0 4px">${l}</div>` + ps.map(p => `<div class="row" data-act="edit" data-col="presets" data-id="${p.id}" style="padding:8px 2px;cursor:pointer"><div class="grow"><b>${esc(p.title)}</b><div class="muted small">${p.months > 0 ? (p.months === 1 ? 'Rappel tous les mois' : 'Rappel tous les ' + p.months + ' mois') : 'Sans rappel'}</div></div><span style="color:var(--teal);font-size:1.6rem;font-weight:900">›</span></div>`).join('') : '';
+      }).join('')}
+      <div class="acts"><button class="btn line" data-act="add" data-col="presets">＋ Ajouter un modèle</button></div></div>
     <div class="sec">Rappels</div>
     <div class="card"><div class="fld" style="margin:0"><label>Alerter quand un rappel est dans moins de (jours)</label><input id="alertDays" type="number" inputmode="numeric" min="1" value="${settings.alertDays}"></div>
       <div class="acts"><button class="btn line" data-act="alert-save">Enregistrer</button></div></div>
