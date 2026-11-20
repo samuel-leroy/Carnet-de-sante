@@ -80,7 +80,7 @@ function remove(col, id) {
   const o = D[col].find(x => x.id === id);
   if (o) { o.deleted = true; o.updatedAt = nowISO(); }
   if (col === 'cats') COLS.filter(c => c !== 'cats' && c !== 'contacts').forEach(c => D[c].forEach(x => {
-    if (x.catId === id && !x.deleted) { x.deleted = true; x.updatedAt = nowISO(); }
+    if (x.catId === id && !x.deleted) { x.deleted = true; x.cascade = id; x.updatedAt = nowISO(); }
   }));
   save();
 }
@@ -178,7 +178,7 @@ const FORMS = {
 };
 
 /* ---------- Navigation ---------- */
-const S = { view: 'home', catId: null, tab: 'profil', plus: 'docs', filter: 'all', range: 12 };
+const S = { view: 'home', catId: null, tab: 'profil', plus: 'docs', filter: 'all', range: 12, sub: null };
 let sheetOpen = false, ignorePop = false, afterPop = null;
 const depth = () => (history.state && history.state.d) || 0;
 function go(patch, push = true) {
@@ -309,7 +309,7 @@ function refreshCloud() {
 }
 let lastKey = '';
 function render() {
-  const key = S.view + S.catId + S.tab + S.plus;
+  const key = S.view + S.catId + S.tab + S.plus + S.sub;
   const sc = $('main') ? $('main').scrollTop : 0;
   const cat = S.catId ? byId('cats', S.catId) : null;
   if (S.view === 'cat' && !cat) { S.view = 'home'; S.catId = null; }
@@ -539,30 +539,73 @@ function tabPlus(c) {
   return h;
 }
 
+const ICO = {
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  bell: '<path d="M6 17v-6a6 6 0 0 1 12 0v6l1.5 2h-15z"/><path d="M10 21h4"/>',
+  sync: '<path d="M20 11a8 8 0 0 0-14.5-4M4 13a8 8 0 0 0 14.5 4"/><path d="M5.5 3v4h4M18.5 21v-4h-4"/>',
+  down: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
+  up: '<path d="M12 20V9M7 13l5-5 5 5M5 4h14"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13M10 11v6M14 11v6"/>',
+  chev: '<path d="M9 5l7 7-7 7"/>'
+};
+const svgi = (k, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg>`;
+const catName = id => ((D.cats.find(c => c.id === id) || {}).name) || '';
+function trashItems() {
+  const out = [];
+  const liveCat = id => !!byId('cats', id);
+  const add = (col, x, icon, label, sub) => out.push({ col, id: x.id, icon, label, sub, at: x.updatedAt || '' });
+  D.cats.filter(x => x.deleted && !x.cascade).forEach(x => add('cats', x, '🐱', x.name, 'Fiche et toutes ses données'));
+  D.weights.filter(x => x.deleted && !x.cascade && liveCat(x.catId)).forEach(x => add('weights', x, '⚖️', fmtKg(x.kg), catName(x.catId) + ' · ' + fmtDate(x.date)));
+  D.events.filter(x => x.deleted && !x.cascade && liveCat(x.catId)).forEach(x => add('events', x, EV[x.type]?.i || '📝', x.title, catName(x.catId) + ' · ' + fmtDate(x.date)));
+  D.notes.filter(x => x.deleted && !x.cascade && liveCat(x.catId)).forEach(x => add('notes', x, '📝', x.title, catName(x.catId)));
+  D.heats.filter(x => x.deleted && !x.cascade && liveCat(x.catId)).forEach(x => add('heats', x, '🌸', 'Chaleurs ' + fmtDate(x.start), catName(x.catId)));
+  D.contacts.filter(x => x.deleted).forEach(x => add('contacts', x, '📞', x.name, x.label || ''));
+  D.presets.filter(x => x.deleted).forEach(x => add('presets', x, EV[x.type]?.i || '💉', x.title, 'Modèle de soin'));
+  return out.sort((a, b) => b.at.localeCompare(a.at));
+}
 function viewSettings() {
   const ls = settings.lastSync ? new Date(settings.lastSync).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }) : 'jamais';
-  return `<header class="top"><button class="ic" data-act="back" aria-label="Retour">${SVG.back}</button><h1>Paramètres</h1><span class="ic ghost"></span></header><main>
-    <div class="sec">Synchronisation Google Drive</div>
-    <div class="card"><p class="small muted" style="margin-top:0">Tes données sont stockées dans ton Drive (dossier « ${esc(CFG.DRIVE_FOLDER || 'Carnet Chats')} »), jamais ailleurs. Dernière synchro : <b>${ls}</b>.${settings.email ? `<br>Compte : <b>${esc(settings.email)}</b>` : ''}</p>
+  const trash = trashItems();
+  const top = t => `<header class="top"><button class="ic" data-act="back" aria-label="Retour">${SVG.back}</button><h1>${t}</h1><span class="ic ghost"></span></header>`;
+  if (!S.sub) {
+    const rows = [
+      ['m-teal', 'sliders', 'Modèles de soins', 'Vaccins, vermifuge, anti-puces', 'data-act="sub" data-v="presets"'],
+      ['m-yellow', 'bell', 'Rappels', `Alerte ${settings.alertDays} jours avant l'échéance`, 'data-act="sub" data-v="alerts"'],
+      ['m-green', 'sync', 'Synchroniser', settings.driveConnected ? `Google Drive · dernière synchro : ${ls}` : 'Google Drive · non connecté', 'data-act="sub" data-v="sync"'],
+      ['m-orange', 'down', 'Importer', 'Fusionner un fichier de sauvegarde', 'data-act="import"'],
+      ['m-coral', 'up', 'Exporter', 'Enregistrer une sauvegarde (.json)', 'data-act="export"'],
+      ['m-blue', 'info', 'À propos', `Version ${APP_VERSION}`, 'data-act="sub" data-v="about"'],
+      ['m-grey', 'trash', `Corbeille (${trash.length})`, 'Restaurer ce qui a été supprimé', 'data-act="sub" data-v="trash"']
+    ];
+    return top('Paramètres') + `<main><div class="menu">${rows.map(([c, i, l, h, a]) => `<div class="mrow" ${a}><span class="mic ${c}">${svgi(i)}</span><div class="grow"><b>${l}</b><div class="muted small">${h}</div></div>${svgi('chev', 'chv')}</div>`).join('')}</div></main>`;
+  }
+  if (S.sub === 'presets') {
+    return top('Modèles de soins') + `<main><div class="card"><p class="small muted" style="margin-top:0">En ajoutant un soin, choisis un modèle : le titre et la date du prochain rappel se remplissent tout seuls. Les durées sont indicatives, à adapter selon l'avis du vétérinaire et le produit utilisé.</p>
+      ${[['vaccin', '💉 Vaccins'], ['vermifuge', '🪱 Vermifuge'], ['antiparasitaire', '🐛 Anti-puces / tiques'], ['traitement', '💊 Traitements']].map(([k, l]) => {
+        const ps = live('presets').filter(p => p.type === k).sort((a, b) => a.title.localeCompare(b.title));
+        return ps.length ? `<div class="sec" style="margin:12px 0 4px">${l}</div>` + ps.map(p => `<div class="row" data-act="edit" data-col="presets" data-id="${p.id}" style="padding:8px 2px;cursor:pointer"><div class="grow"><b>${esc(p.title)}</b><div class="muted small">${p.months > 0 ? (p.months === 1 ? 'Rappel tous les mois' : 'Rappel tous les ' + p.months + ' mois') : 'Sans rappel'}</div></div>${svgi('chev', 'chv')}</div>`).join('') : '';
+      }).join('')}
+      <div class="acts"><button class="btn line" data-act="add" data-col="presets">＋ Ajouter un modèle</button></div></div></main>`;
+  }
+  if (S.sub === 'alerts') {
+    return top('Rappels') + `<main><div class="card"><div class="fld" style="margin:0"><label>Alerter quand un rappel est dans moins de (jours)</label><input id="alertDays" type="number" inputmode="numeric" min="1" value="${settings.alertDays}"></div>
+      <div class="acts"><button class="btn line" data-act="alert-save">Enregistrer</button></div></div></main>`;
+  }
+  if (S.sub === 'sync') {
+    return top('Synchroniser') + `<main><div class="card"><p class="small muted" style="margin-top:0">Tes données sont stockées dans ton Drive (dossier « ${esc(CFG.DRIVE_FOLDER || 'Carnet Chats')} »), jamais ailleurs. Dernière synchro : <b>${ls}</b>.${settings.email ? `<br>Compte : <b>${esc(settings.email)}</b>` : ''}</p>
       <button class="btn block" data-act="sync">☁️ Synchroniser maintenant</button>
       <div class="fld" style="margin-top:14px"><label>Identifiant client Google (OAuth)</label><input id="clientId" placeholder="xxxxx.apps.googleusercontent.com" value="${esc(settings.clientId || CFG.GOOGLE_CLIENT_ID || '')}"></div>
       <div class="fld"><label>Compte Google commun (adresse e-mail)</label><input id="gmail" type="email" autocomplete="off" placeholder="compte.commun@gmail.com" value="${esc(settings.email || '')}"></div>
-      <div class="acts"><button class="btn line" data-act="client-save">Enregistrer</button>${settings.driveConnected ? '<button class="btn danger" data-act="disconnect">Se déconnecter</button>' : ''}</div></div>
-    <div class="sec">Modèles de soins</div>
-    <div class="card"><p class="small muted" style="margin-top:0">En ajoutant un soin, choisis un modèle : le titre et la date du prochain rappel se remplissent tout seuls. Les durées sont indicatives, à adapter selon l'avis du vétérinaire et le produit utilisé.</p>
-      ${[['vaccin', '💉 Vaccins'], ['vermifuge', '🪱 Vermifuge'], ['antiparasitaire', '🐛 Anti-puces / tiques'], ['traitement', '💊 Traitements']].map(([k, l]) => {
-        const ps = live('presets').filter(p => p.type === k).sort((a, b) => a.title.localeCompare(b.title));
-        return ps.length ? `<div class="sec" style="margin:12px 0 4px">${l}</div>` + ps.map(p => `<div class="row" data-act="edit" data-col="presets" data-id="${p.id}" style="padding:8px 2px;cursor:pointer"><div class="grow"><b>${esc(p.title)}</b><div class="muted small">${p.months > 0 ? (p.months === 1 ? 'Rappel tous les mois' : 'Rappel tous les ' + p.months + ' mois') : 'Sans rappel'}</div></div><span style="color:var(--teal);font-size:1.6rem;font-weight:900">›</span></div>`).join('') : '';
-      }).join('')}
-      <div class="acts"><button class="btn line" data-act="add" data-col="presets">＋ Ajouter un modèle</button></div></div>
-    <div class="sec">Rappels</div>
-    <div class="card"><div class="fld" style="margin:0"><label>Alerter quand un rappel est dans moins de (jours)</label><input id="alertDays" type="number" inputmode="numeric" min="1" value="${settings.alertDays}"></div>
-      <div class="acts"><button class="btn line" data-act="alert-save">Enregistrer</button></div></div>
-    <div class="sec">Données</div>
-    <div class="card"><div class="acts" style="margin-top:0"><button class="btn line" data-act="export">⬇️ Exporter</button><button class="btn line" data-act="import">⬆️ Importer</button></div>
-      <p class="small muted">L'export contient les fiches, poids et soins (pas les photos, qui sont dans ton Drive). L'import fusionne sans rien écraser de plus récent.</p></div>
-    <div class="sec">À propos</div>
-    <div class="card"><b>Carnet de santé des chats</b><div class="muted small">Version ${APP_VERSION} · ${APP_DATE}</div></div></main>`;
+      <div class="acts"><button class="btn line" data-act="client-save">Enregistrer</button>${settings.driveConnected ? '<button class="btn danger" data-act="disconnect">Se déconnecter</button>' : ''}</div></div></main>`;
+  }
+  if (S.sub === 'trash') {
+    return top('Corbeille') + `<main>${trash.length ? trash.map(t => `<div class="card item"><div class="ico">${t.icon}</div><div class="grow"><div class="t">${esc(t.label)}</div><div class="m">${esc(t.sub)}</div></div><button class="btn sm" data-act="restore" data-col="${t.col}" data-id="${t.id}">Restaurer</button></div>`).join('')
+      + `<p class="small muted" style="margin:10px 6px">Les photos et documents supprimés ne peuvent pas être restaurés.</p>`
+      : `<div class="empty"><span class="big">🗑️</span>La corbeille est vide.</div>`}</main>`;
+  }
+  return top('À propos') + `<main><div class="card"><b>Carnet de santé des chats</b><div class="muted small">Version ${APP_VERSION} · ${APP_DATE}</div>
+    <p class="small muted">Tes données restent sur ton appareil et dans ton Google Drive. Rien n'est envoyé ailleurs.</p></div></main>`;
 }
 
 /* ---------- Actions ---------- */
@@ -616,7 +659,14 @@ document.addEventListener('click', async e => {
   const t = e.target.closest('[data-act]'); if (!t) return;
   const a = t.dataset.act, d = t.dataset;
   switch (a) {
-    case 'settings': go({ view: 'settings' }); break;
+    case 'settings': go({ view: 'settings', sub: null }); break;
+    case 'sub': go({ sub: d.v }); break;
+    case 'restore': {
+      const o = D[d.col].find(x => x.id === d.id); if (!o) break;
+      o.deleted = false; delete o.cascade; o.updatedAt = nowISO();
+      if (d.col === 'cats') COLS.forEach(c => D[c].forEach(x => { if (x.cascade === d.id) { x.deleted = false; delete x.cascade; x.updatedAt = nowISO(); } }));
+      save(); render(); toast('Restauré ✓'); break;
+    }
     case 'back': if (depth() > 0) history.back(); else go({ view: 'home', catId: null }, false); break;
     case 'open-cat': go({ view: 'cat', catId: d.id, tab: 'profil', filter: 'all' }); break;
     case 'open-cat-tab': go({ view: 'cat', catId: d.id, tab: d.tab, filter: 'all' }); break;

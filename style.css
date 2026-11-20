@@ -154,3 +154,14 @@ h1.tribu{margin:0;text-align:center;font-size:2.5rem;line-height:1.05;font-weigh
 .yb{width:46px;height:46px;border-radius:50%;background:linear-gradient(145deg,#ffe66d,#f5a623);display:grid;place-items:center;font-size:1.35rem;flex-shrink:0;box-shadow:0 3px 8px rgba(0,60,55,.25)}
 .homehint{background:rgba(255,255,255,.16);border-radius:18px;padding:12px 14px;font-size:.9rem;margin-top:16px}
 .tcard.empty-t .big{font-size:2.6rem;display:block}
+
+/* ---------- Menu Paramètres ---------- */
+.menu{display:flex;flex-direction:column;gap:12px}
+.mrow{background:#fff;border-radius:28px;padding:12px 14px 12px 12px;display:flex;align-items:center;gap:14px;cursor:pointer;box-shadow:0 2px 12px rgba(0,100,90,.08)}
+.mrow:active{transform:scale(.99)}
+.mrow b{font-size:1.12rem}
+.mic{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;flex-shrink:0}
+.mic svg{width:26px;height:26px}
+svg.chv{width:22px;height:22px;color:var(--teal);flex-shrink:0}
+.m-teal{background:#d6f1ee;color:#00796f}.m-yellow{background:#fff1b8;color:#9a6b00}.m-green{background:#d8f3e3;color:#1f8f55}
+.m-orange{background:#ffe3c7;color:#c26a00}.m-coral{background:#ffdcd9;color:#d24a40}.m-blue{background:#dbeaff;color:#2b6cb0}.m-grey{background:#e8eeed;color:#6b8a87}
