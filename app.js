@@ -694,7 +694,9 @@ document.addEventListener('click', async e => {
     case 'doc-open': openDoc(d.id); break;
     case 'sync': sync(true); break;
     case 'client-save': {
-      settings.clientId = $('#clientId').value.trim();
+      const cid = ($('#clientId').value || '').replace(/\s+/g, '');
+      if (cid && !CLIENT_ID_RE.test(cid)) { toast('Identifiant invalide : il doit ressembler à 123456789-abcdef.apps.googleusercontent.com'); break; }
+      settings.clientId = cid;
       const em = ($('#gmail').value || '').trim();
       if (em !== (settings.email || '')) { settings.driveConnected = false; try { localStorage.removeItem(TKEY); } catch (x) {} }
       settings.email = em; token = null; tokenExp = 0; saveSettings(); render(); toast('Enregistré : appuie sur le nuage ☁️ pour te connecter'); break;
@@ -723,6 +725,7 @@ const loadGIS = () => new Promise((res, rej) => {
   s.onerror = () => rej(new Error('Connexion à Google impossible (hors ligne ?)')); document.head.appendChild(s);
 });
 const TKEY = 'carnetChats.v1.token';
+const CLIENT_ID_RE = /^[0-9]+-[a-z0-9_]+\.apps\.googleusercontent\.com$/i;
 const hasToken = () => !!token && Date.now() < tokenExp - 60000;
 function loadStoredToken() {
   try { const t = JSON.parse(localStorage.getItem(TKEY)); if (t && t.t && t.exp > Date.now() + 60000) { token = t.t; tokenExp = t.exp; } } catch (e) {}
@@ -730,8 +733,9 @@ function loadStoredToken() {
 async function getToken(silent) {
   if (!hasToken()) loadStoredToken();
   if (hasToken()) return token;
-  const cid = settings.clientId || CFG.GOOGLE_CLIENT_ID;
-  if (!cid) { if (!silent) go({ view: 'settings' }); throw new Error("Renseigne d'abord l'identifiant client Google"); }
+  const cid = (settings.clientId || CFG.GOOGLE_CLIENT_ID || '').replace(/\s+/g, '');
+  if (!cid) { if (!silent) go({ view: 'settings', sub: 'sync' }); throw new Error("Renseigne d'abord l'identifiant client Google"); }
+  if (!CLIENT_ID_RE.test(cid)) { if (!silent) go({ view: 'settings', sub: 'sync' }); throw new Error("Identifiant client Google invalide : vérifie-le dans Paramètres → Synchroniser"); }
   await loadGIS();
   return new Promise((res, rej) => {
     const tc = google.accounts.oauth2.initTokenClient({
